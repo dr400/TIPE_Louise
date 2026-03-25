@@ -41,7 +41,7 @@ Le programme :
 
 Dans la fonction `calibrate_cameras()` :
 
-- `chessboard_size = (8, 6)` : nombre d’intersections internes (colonnes, lignes).
+- `chessboard_size = (8, 6)` : nombre de coins internes (colonnes, lignes).
 - `square_size = 30.0` : taille d’une case du damier en millimètres.
 
 Adaptez ces valeurs à votre damier.
