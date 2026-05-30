@@ -100,8 +100,8 @@ def trianguler(pt_gauche, pt_droite, calib):
 
 
 #reprojection : vérification visuelle
-# On reprojecte les points 3D calculés sur les images pour vérifier
-# que la ligne de but est bien placée.
+#on reprojecte les points 3D calculés sur les images pour vérifier
+#que la ligne de but est bien placée
 
 def reprojeter_ligne(frame, A_3d, B_3d, K, D, R=None, T=None):
     def projeter(pt3d):
@@ -120,10 +120,10 @@ def reprojeter_ligne(frame, A_3d, B_3d, K, D, R=None, T=None):
 # PROGRAMME PRINCIPAL
 
 def main():
-    # 1. Calibration
+    #1. Calibration
     calib = charger_calibration(CALIB_FILE)
 
-    # 2. Capture d'une image depuis chaque caméra
+    #2. Capture d'une image depuis chaque caméra
     cap_g = cv2.VideoCapture(CAM_GAUCHE)
     cap_d = cv2.VideoCapture(CAM_DROITE)
     _, frame_gauche = cap_g.read() #vérifie que l'image peut être lue
@@ -131,24 +131,17 @@ def main():
     cap_g.release()
     cap_d.release()
 
-    # 3. Sélection des points sur la caméra gauche(d'abord l'extrémité gauche puis droite)
+    #3. Sélection des points sur la caméra gauche(d'abord l'extrémité gauche puis droite)
     ptA_g, ptB_g = selectionner_deux_points(frame_gauche, "Caméra Gauche")
 
-    # 4. Sélection des mêmes points sur la caméra droite
+    #4. Sélection des mêmes points sur la caméra droite
     ptA_d, ptB_d = selectionner_deux_points(frame_droite, "Caméra Droite")
 
-    # 5. Triangulation → coordonnées 3D des deux extrémités de la ligne
-    print("\nTriangulation...")
+    #5. Triangulation → coordonnées 3D des deux extrémités de la ligne
     A_3d = trianguler(ptA_g, ptA_d, calib)
     B_3d = trianguler(ptB_g, ptB_d, calib)
-    print(f"  Extrémité A : {A_3d} mm")
-    print(f"  Extrémité B : {B_3d} mm")
 
-    # 6. Sauvegarde
-    with open(GOAL_LINE_FILE, "w") as f:
-        json.dump({"point_A": A_3d.tolist(), "point_B": B_3d.tolist()}, f, indent=2)
-
-    # 7. Vérification visuelle : reprojection sur les deux images
+    #6. Vérification visuelle : reprojection sur les deux images
     print("Vérification visuelle — appuyez sur une touche pour fermer.")
     reprojeter_ligne(frame_gauche, A_3d, B_3d, calib["focale"], calib["D1"])
     reprojeter_ligne(frame_droite, A_3d, B_3d, calib["centre optique"], calib["D2"],
