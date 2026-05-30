@@ -1,0 +1,91 @@
+import numpy as np #pour les matrices
+import cv2 #vision par ordinateur
+import glob #cherche des fichiers dans l'ordi 
+
+def calibrate_cameras():
+    #taille du damier (interstices entre colonnes et lignes et non le nombre de cases)
+    chessboard_size = (8, 4) 
+    
+    #taille d'une case en millimètres (mesurée sur mon damier)
+    square_size = 30.0 
+
+    #optimisation de la précision(au sous-pixel près)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+    #crée un tableau de 8x6 lignes et 3 colonnes de 0 qui repésentent les coordonnées du damier
+    objp = np.zeros((chessboard_size[0] * chessboard_size[1], 3), np.float32)   #3 pour les coordonnées de type float
+    objp[:, :2] = np.mgrid[0:chessboard_size[0], 0:chessboard_size[1]].T.reshape(-1, 2) #shape en matrice
+    objp = objp * square_size #multiplie les coordonnées par 30mm pour que chaque coins ait ses coordonnées
+    #np.mgrid crée une grille de coordonnées que T.reshape(-1, 2) transforme en liste de points (x, y) (z=0 car plat)
+     
+    #initialisation des listes 
+    objpoints = [] #points 3D (monde réel)
+    imgpoints_left = [] #points 2D de la caméra gauche
+    imgpoints_right = [] #points 2D de la caméra droite
+
+  
+    #récupération des images (ATTENTION il faut le même nombre d'images pour les 2 cam)
+    images_left = sorted(glob.glob('images/gauche/*.png')) #glob récup les images dans un dossier triées 
+    images_right = sorted(glob.glob('images/droite/*png'))#sort les tries pour que im1d soit bien avec im1g
+
+    image_size = None
+
+    for img_left_path, img_right_path in zip(images_left, images_right): #zip associe les deux images qui vont ensemble
+        img_left = cv2.imread(img_left_path) #stocke en mémoire en RGB
+        img_right = cv2.imread(img_right_path)
+        
+        gray_left = cv2.cvtColor(img_left, cv2.COLOR_BGR2GRAY) #convertit en différentes teintes de gris en fonction de la luminosité 
+        gray_right = cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY) #+rapide en niveaux de gris que RGB
+
+        if image_size is None:
+            image_size = gray_left.shape[::-1] # prend (largeur,hauteur) renvoie (hauteur,largeur) ?????????
+
+        #détecte les coins du damier
+        ret_left, corners_left = cv2.findChessboardCorners(gray_left, chessboard_size, None)
+        ret_right, corners_right = cv2.findChessboardCorners(gray_right, chessboard_size, None)
+        #ret_ est un booléen qui renvoie True si les 8x6 coins ont été trouvés
+        #corners_ est le tableau des coordonnées en pixel de chaque coin détecté
+        
+        
+        #condition : le damier doit être vu par les DEUX caméras sur cette paire d'images:
+        if ret_left and ret_right:
+            objpoints.append(objp) #alors ajout des coordonnées réelles
+
+            #plus de précision (pas obligatoire je pense)
+            corners2_left = cv2.cornerSubPix(gray_left, corners_left, (11, 11), (-1, -1), criteria)
+            imgpoints_left.append(corners2_left) #stock les positions + précises
+
+            corners2_right = cv2.cornerSubPix(gray_right, corners_right, (11, 11), (-1, -1), criteria)
+            imgpoints_right.append(corners2_right) #stock les positions + précises
+
+    #calibration intrinsèque
+    ret_l, mtx_l, dist_l, rvecs_l, tvecs_l = cv2.calibrateCamera(objpoints, imgpoints_left, image_size, None, None)
+    #ret_l = erreur de reprojection 
+    #mtx_l = matrice intrinsèque
+    #dist_l = distorsion 
+    #rvecs_l, tvecs_l = vecteurs de rotation et translation
+    
+    ret_r, mtx_r, dist_r, rvecs_r, tvecs_r = cv2.calibrateCamera(objpoints, imgpoints_right, image_size, None, None)
+    #pareil mais pour l'autre caméra
+    
+    
+    #calibration extrinsèque
+    flags = cv2.CALIB_FIX_INTRINSIC
+    #on fixe les paramètres intrinsèques trouvés juste au-dessus vu que on s'interesse à la géométrie
+    
+    #calcul de la relation spatiale entre les 2 caméras : 
+    ret_stereo, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(
+        objpoints, imgpoints_left, imgpoints_right,
+        mtx_l, dist_l,
+        mtx_r, dist_r,
+        image_size, criteria=criteria, flags=flags)
+    
+    #enregistrement des résultats dans un fichier .npz (format binaire numpy)(pour les utiliser plus tard)
+    np.savez('stereo_calibration_data.npz', 
+             mtx_l=mtx_l, dist_l=dist_l, 
+             mtx_r=mtx_r, dist_r=dist_r, 
+             R=R, T=T)
+
+if __name__ == '__main__':
+    calibrate_cameras()
+#lance le programme si on exécute la cellule
