@@ -32,7 +32,7 @@ def charger_calibration(chemin):
     #donc R = identité et t = zéro
     P1 = foc @ np.hstack([np.eye(3), np.zeros((3, 1))])
     # Pour la caméra droite, on utilise R et T issus de la calibration
-    P2 = oc @ np.hstack([R, T])
+    P2 = co @ np.hstack([R, T])
     return {"focale": foc, "D1": D1, "centre optique": co, "D2": D2, "rotation": R, "translation": T,
             "matrice 1": P1, "matrice 2": P2}
 
@@ -51,7 +51,7 @@ def selectionner_deux_points(frame, titre):
     global points_cliques
     points_cliques= []
     cv2.namedWindow(titre)
-    cv2.setMouseCallback(titre, callback_souris)
+    cv2.setMouseCallback(titre, clic_souris)
 
     while True:
         affichage= frame.copy()
@@ -86,17 +86,17 @@ def corriger_distorsion(pt, K, D):
 
 def trianguler(pt_gauche, pt_droite, calib):
     #correction de la distorsion
-    u_gauche = corriger_distorsion(pt_gauche, calib["foc"], calib["D1"])
-    u_droite = corriger_distorsion(pt_droite, calib["co"], calib["D2"])
+    u_gauche = corriger_distorsion(pt_gauche, calib["focale"], calib["D1"])
+    u_droite = corriger_distorsion(pt_droite, calib["centre optique"], calib["D2"])
 
     #triangulation : résolution du système de rayons visuels
     pts4dim = cv2.triangulatePoints(
-        calib["P1"], calib["P2"],
+        calib["matrice 1"], calib["matrice 2"],
         np.array(u_gauche).reshape(2, 1), np.array(u_droite).reshape(2, 1))
 
     #passage des coordonnées homogènes (X,Y,Z,W) → euclidiennes (X,Y,Z)
     pt3dim = (pts4dim[:3] / pts4dim[3]).flatten()
-    return pt3d
+    return pt3dim
 
 
 #reprojection : vérification visuelle
@@ -126,8 +126,8 @@ def main():
     # 2. Capture d'une image depuis chaque caméra
     cap_g = cv2.VideoCapture(CAM_GAUCHE)
     cap_d = cv2.VideoCapture(CAM_DROITE)
-    frame_gauche = cap_g.read() #vérifie que l'image peut être lue
-    frame_droite = cap_d.read()
+    _, frame_gauche = cap_g.read() #vérifie que l'image peut être lue
+    _, frame_droite = cap_d.read()
     cap_g.release()
     cap_d.release()
 
@@ -150,12 +150,11 @@ def main():
 
     # 7. Vérification visuelle : reprojection sur les deux images
     print("Vérification visuelle — appuyez sur une touche pour fermer.")
-    reprojeter_ligne(frame_gauche, A_3d, B_3d, calib["K1"], calib["D1"])
-    reprojeter_ligne(frame_droite, A_3d, B_3d, calib["K2"], calib["D2"],
-                     calib["R"], calib["T"])
+    reprojeter_ligne(frame_gauche, A_3d, B_3d, calib["focale"], calib["D1"])
+    reprojeter_ligne(frame_droite, A_3d, B_3d, calib["centre optique"], calib["D2"],
+                     calib["rotation"], calib["translation"])
 
     cv2.imshow("Caméra Gauche — Vérification", frame_gauche)
     cv2.imshow("Caméra Droite — Vérification", frame_droite)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-
