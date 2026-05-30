@@ -1,0 +1,161 @@
+import cv2
+import numpy as np
+import json
+
+#fichiers
+CALIB_FILE= "stereo_calibration_data.npz" #produit par le programme de calibration
+GOAL_LINE_FILE= "goal_line.json" #fichier de sortie
+
+#indices des caméras
+CAM_GAUCHE= 0
+CAM_DROITE= 1
+
+
+#récupération les paramètres calculés lors de la calibration:
+#foc=focale
+#co=centre optique
+#D1 et D2=coeff de distorsion 
+#R=rotation
+#T=translation 
+#P1 et P2=matrices de projection
+
+def charger_calibration(chemin):
+    data = np.load(chemin)
+    foc = data["mtx_l"].astype(np.float64)  # matrice intrinsèque de la caméra gauche
+    D1 = data["dist_l"].astype(np.float64)  # distorsion de la caméra gauche
+    co = data["mtx_r"].astype(np.float64)   # matrice intrinsèque de la caméra droite
+    D2 = data["dist_r"].astype(np.float64)  # distorsion de la caméra droite
+    R  = data["R"].astype(np.float64)       # rotation cam gauche → cam droite
+    T  = data["T"].astype(np.float64)       # translation cam gauche → cam droite
+    #on suppose que la caméra gauche(1) est le repère 
+    #la matrice de projection = K * [R | t]
+    #donc R = identité et t = zéro
+    P1 = foc @ np.hstack([np.eye(3), np.zeros((3, 1))])
+    # Pour la caméra droite, on utilise R et T issus de la calibration
+    P2 = oc @ np.hstack([R, T])
+    return {"focale": foc, "D1": D1, "centre optique": co, "D2": D2, "rotation": R, "translation": T,
+            "matrice 1": P1, "matrice 2": P2}
+
+
+
+#2 points sur la ligne de but dans chaque caméra
+#stockage des coordonnées pixel de chaque clic
+
+points_cliques=[] #liste globale remplie par le clic souris
+
+def clic_souris(evenement, x, y, flags, param):
+    if evenement == cv2.EVENT_LBUTTONDOWN and len(points_cliques) < 2:
+        points_cliques.append((x, y))
+
+def selectionner_deux_points(frame, titre):
+    global points_cliques
+    points_cliques= []
+    cv2.namedWindow(titre)
+    cv2.setMouseCallback(titre, callback_souris)
+
+    while True:
+        affichage= frame.copy()
+
+        #dessiner les points déjà cliqués
+        for pt in points_cliques:
+            cv2.circle(affichage, pt, 6, (0, 255, 0), -1)
+
+        #dessiner la ligne quand les 2 points sont sélectionnés
+        if len(points_cliques)== 2:
+            cv2.line(affichage, points_cliques[0], points_cliques[1], (0, 0, 255), 2)
+            cv2.putText(affichage, "OK ? Appuyez sur Q pour valider",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+
+        cv2.imshow(titre, affichage)
+        touche= cv2.waitKey(1) & 0xFF
+
+        if touche == ord('q') and len(points_cliques) == 2:
+            break
+        if touche == ord('r'):          # recommencer si erreur
+            points_cliques = []
+
+    cv2.destroyAllWindows()
+    return points_cliques[0], points_cliques[1]
+
+
+#Triangulation : 2D + 2D → 3D
+def corriger_distorsion(pt, K, D):
+    pts = np.array([[pt]], dtype=np.float64)
+    return cv2.undistortPoints(pts, K, D, P=K)[0][0]
+
+
+def trianguler(pt_gauche, pt_droite, calib):
+    #correction de la distorsion
+    u_gauche = corriger_distorsion(pt_gauche, calib["foc"], calib["D1"])
+    u_droite = corriger_distorsion(pt_droite, calib["co"], calib["D2"])
+
+    #triangulation : résolution du système de rayons visuels
+    pts4dim = cv2.triangulatePoints(
+        calib["P1"], calib["P2"],
+        np.array(u_gauche).reshape(2, 1), np.array(u_droite).reshape(2, 1))
+
+    #passage des coordonnées homogènes (X,Y,Z,W) → euclidiennes (X,Y,Z)
+    pt3dim = (pts4dim[:3] / pts4dim[3]).flatten()
+    return pt3d
+
+
+#reprojection : vérification visuelle
+# On reprojecte les points 3D calculés sur les images pour vérifier
+# que la ligne de but est bien placée.
+
+def reprojeter_ligne(frame, A_3d, B_3d, K, D, R=None, T=None):
+    def projeter(pt3d):
+        rvec, _ = cv2.Rodrigues(R if R is not None else np.eye(3))
+        t = T if T is not None else np.zeros((3, 1))
+        p2d, _ = cv2.projectPoints(pt3d.reshape(1, 1, 3), rvec, t, K, D)
+        return tuple(p2d[0][0].astype(int))
+
+    pA = projeter(A_3d)
+    pB = projeter(B_3d)
+    cv2.line(frame, pA, pB, (0, 0, 255), 3)
+    cv2.circle(frame, pA, 6, (0, 255, 0), -1)
+    cv2.circle(frame, pB, 6, (0, 255, 0), -1)
+
+
+# PROGRAMME PRINCIPAL
+
+def main():
+    # 1. Calibration
+    calib = charger_calibration(CALIB_FILE)
+
+    # 2. Capture d'une image depuis chaque caméra
+    cap_g = cv2.VideoCapture(CAM_GAUCHE)
+    cap_d = cv2.VideoCapture(CAM_DROITE)
+    frame_gauche = cap_g.read() #vérifie que l'image peut être lue
+    frame_droite = cap_d.read()
+    cap_g.release()
+    cap_d.release()
+
+    # 3. Sélection des points sur la caméra gauche(d'abord l'extrémité gauche puis droite)
+    ptA_g, ptB_g = selectionner_deux_points(frame_gauche, "Caméra Gauche")
+
+    # 4. Sélection des mêmes points sur la caméra droite
+    ptA_d, ptB_d = selectionner_deux_points(frame_droite, "Caméra Droite")
+
+    # 5. Triangulation → coordonnées 3D des deux extrémités de la ligne
+    print("\nTriangulation...")
+    A_3d = trianguler(ptA_g, ptA_d, calib)
+    B_3d = trianguler(ptB_g, ptB_d, calib)
+    print(f"  Extrémité A : {A_3d} mm")
+    print(f"  Extrémité B : {B_3d} mm")
+
+    # 6. Sauvegarde
+    with open(GOAL_LINE_FILE, "w") as f:
+        json.dump({"point_A": A_3d.tolist(), "point_B": B_3d.tolist()}, f, indent=2)
+
+    # 7. Vérification visuelle : reprojection sur les deux images
+    print("Vérification visuelle — appuyez sur une touche pour fermer.")
+    reprojeter_ligne(frame_gauche, A_3d, B_3d, calib["K1"], calib["D1"])
+    reprojeter_ligne(frame_droite, A_3d, B_3d, calib["K2"], calib["D2"],
+                     calib["R"], calib["T"])
+
+    cv2.imshow("Caméra Gauche — Vérification", frame_gauche)
+    cv2.imshow("Caméra Droite — Vérification", frame_droite)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
