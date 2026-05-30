@@ -26,7 +26,7 @@ def calibrate_cameras():
   
     #récupération des images (ATTENTION il faut le même nombre d'images pour les 2 cam)
     images_left = sorted(glob.glob('images/gauche/*.png')) #glob récup les images dans un dossier triées 
-    images_right = sorted(glob.glob('images/droite/*png'))#sort les tries pour que im1d soit bien avec im1g
+    images_right = sorted(glob.glob('images/droite/*.png'))#sort les tries pour que im1d soit bien avec im1g
 
     image_size = None
 
